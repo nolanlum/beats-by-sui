@@ -1,5 +1,5 @@
 /*
-This code is based on the QM DSP Library, ported to WebAssembly-suitable Rust.
+This code is based on the QM DSP Library, badly ported to Rust.
 
 The original code can be found at https://github.com/c4dm/qm-dsp/blob/master/dsp/onsets/DetectionFunction.cpp.
 */
@@ -11,7 +11,18 @@ use rustfft::{Fft, FftPlanner};
 use std::f64::consts::PI;
 use std::sync::Arc;
 
-type c64 = Complex64;
+mod math {
+    use std::f64::consts::PI;
+
+    fn modulus(x: f64, y: f64) -> f64 {
+        let a = f64::floor(x / y);
+        x - (y * a)
+    }
+
+    pub fn princarg(ang: f64) -> f64 {
+        modulus(ang + PI, -2.0 * PI) + PI
+    }
+}
 
 /// As far as I can tell, this is not a "true" phase vocoder, it only extracts phase information
 /// and does not resynthesize them into time-domain samples.
@@ -22,12 +33,12 @@ struct PhaseVocoder {
     half_size: usize,
     hop: usize,
 
-    freq: Vec<c64>,
+    freq: Vec<Complex64>,
     phase: Vec<f64>,
     unwrapped: Vec<f64>,
 
     fft: Arc<dyn Fft<f64>>,
-    fft_scratch: Vec<c64>,
+    fft_scratch: Vec<Complex64>,
 }
 
 impl PhaseVocoder {
@@ -70,6 +81,8 @@ impl PhaseVocoder {
     ) {
         assert!(frame.len() >= self.frame_size);
 
+        // I do not quite understand why, but the vocoder places the "zero" of the phases in the
+        // center of the (windowed) samples, so we shift the values over here.
         for i in 0..self.frame_size {
             self.freq[i] = Complex64::new(frame[(i + self.frame_size / 2) % self.frame_size], 0.0)
         }
@@ -82,15 +95,19 @@ impl PhaseVocoder {
     }
 
     fn get_magnitudes(&self, magnitudes: &mut [f64]) {
-        for i in 0..self.half_size {
-            magnitudes[i] = self.freq[i].norm();
-        }
+        assert!(magnitudes.len() >= self.half_size);
+        magnitudes
+            .iter_mut()
+            .zip(self.freq.iter())
+            .for_each(|(mag, freq)| *mag = freq.norm());
     }
 
     fn get_phases(&self, theta: &mut [f64]) {
-        for i in 0..self.half_size {
-            theta[i] = self.freq[i].arg();
-        }
+        assert!(theta.len() >= self.half_size);
+        theta
+            .iter_mut()
+            .zip(self.freq.iter())
+            .for_each(|(theta, freq)| *theta = freq.arg());
     }
 
     fn unwrap_phases(&mut self, theta: &[f64], unwrapped: &mut [f64]) {
@@ -100,7 +117,7 @@ impl PhaseVocoder {
         for i in 0..self.half_size {
             let omega = (2.0 * PI * self.hop as f64 * i as f64) / self.frame_size as f64;
             let expected = self.phase[i] + omega;
-            let error = PhaseVocoder::princarg(theta[i] - expected);
+            let error = math::princarg(theta[i] - expected);
 
             unwrapped[i] = self.unwrapped[i] + omega + error;
 
@@ -108,28 +125,21 @@ impl PhaseVocoder {
             self.unwrapped[i] = unwrapped[i];
         }
     }
-
-    fn modulus(x: f64, y: f64) -> f64 {
-        let a = f64::floor(x / y);
-        x - (y * a)
-    }
-
-    fn princarg(ang: f64) -> f64 {
-        PhaseVocoder::modulus(ang + PI, -2.0 * PI) + PI
-    }
 }
 
-mod DetectionFunction {
-    pub enum Kind {
-        HFC,
-        SPECDIFF,
-        PHASEDEV,
-        COMPLEXSD,
-        BROADBAND,
+pub mod DetectionFunction {
+    use rustfft::num_complex::Complex64;
+
+    pub enum Type {
+        Hfc,
+        SpecDiff,
+        PhaseDev,
+        ComplexSD,
+        Broadband,
     }
 
     pub struct DetectionFunction {
-        dfType: Kind,
+        dfType: Type,
 
         dataLength: usize,
         halfLength: usize,
@@ -138,6 +148,11 @@ mod DetectionFunction {
         whiten: bool,
         whitenRelaxCoeff: f64,
         whitenFloor: f64,
+
+        magHistory: Vec<f64>,
+        phaseHistory: Vec<f64>,
+        phaseHistoryOld: Vec<f64>,
+        magPeaks: Vec<f64>,
 
         phaseVoc: super::PhaseVocoder,
 
@@ -153,7 +168,7 @@ mod DetectionFunction {
         pub fn new(
             step_size: usize,           // DF step in samples
             frame_length: usize,        // DF analysis window - usually 2*step. Must be even!
-            df_type: Kind,              // Type of detection function
+            df_type: Type,              // Type of detection function
             db_rise: f64,               // Only used for broadband df (and required for it)
             adaptive_whitening: bool,   // Perform adaptive whitening
             whitening_relax_coeff: f64, // If < 0, a sensible default will be used
@@ -181,6 +196,11 @@ mod DetectionFunction {
                     whitening_floor
                 },
 
+                magHistory: vec![0.0; halfLength],
+                phaseHistory: vec![0.0; halfLength],
+                phaseHistoryOld: vec![0.0; halfLength],
+                magPeaks: vec![0.0; halfLength],
+
                 phaseVoc: super::PhaseVocoder::new(frame_length, step_size),
 
                 magnitude: vec![0.0; halfLength],
@@ -189,6 +209,149 @@ mod DetectionFunction {
 
                 window: apodize::hanning_iter(frame_length).collect(),
                 windowed: vec![0.0; frame_length],
+            }
+        }
+
+        pub fn new_with_defaults(
+            step_size: usize,    // DF step in samples
+            frame_length: usize, // DF analysis window - usually 2*step. Must be even!
+        ) -> Self {
+            Self::new(
+                step_size,
+                frame_length,
+                Type::ComplexSD,
+                3.0,
+                false,
+                -1.0,
+                -1.0,
+            )
+        }
+
+        pub fn process_time_domain(&mut self, samples: &[f64]) -> f64 {
+            assert!(samples.len() >= self.dataLength);
+
+            self.windowed
+                .iter_mut()
+                .zip(samples.iter().zip(self.window.iter()).map(|(x, y)| x * y))
+                .for_each(|(win, sample)| *win = sample);
+
+            self.phaseVoc.process_time_domain(
+                &self.windowed,
+                &mut self.magnitude,
+                &mut self.thetaAngle,
+                &mut self.unwrapped,
+            );
+
+            if self.whiten {
+                self.whiten()
+            }
+
+            self.run_df()
+        }
+
+        fn whiten(&mut self) {
+            for (mag, peak) in self.magnitude.iter_mut().zip(self.magPeaks.iter_mut()) {
+                let m = (if *mag < *peak {
+                    *mag + (*peak - *mag) * self.whitenRelaxCoeff
+                } else {
+                    *mag
+                })
+                .max(self.whitenFloor);
+
+                *peak = m;
+                *mag /= m;
+            }
+        }
+
+        fn run_df(&mut self) -> f64 {
+            match self.dfType {
+                Type::Hfc => self
+                    .magnitude
+                    .iter()
+                    .enumerate()
+                    .map(|(i, val)| val * (i + 1) as f64)
+                    .sum(),
+                Type::SpecDiff => self
+                    .magnitude
+                    .iter()
+                    .zip(self.magHistory.iter_mut())
+                    .map(|(mag, magHistory)| {
+                        let diff = (mag.powi(2) - magHistory.powi(2)).abs().sqrt();
+
+                        // (See note in phaseDev below.)
+
+                        *magHistory = *mag;
+                        diff
+                    })
+                    .sum(),
+                Type::PhaseDev => self
+                    .thetaAngle
+                    .iter()
+                    .zip(
+                        self.phaseHistory
+                            .iter_mut()
+                            .zip(self.phaseHistoryOld.iter_mut()),
+                    )
+                    .map(|(theta, (history, historyOld))| {
+                        let dev = super::math::princarg(theta - 2.0 * *history + *historyOld).abs();
+
+                        // A previous version of this code only counted the value here
+                        // if the magnitude exceeded 0.1.  My impression is that
+                        // doesn't greatly improve the results for "loud" music (so
+                        // long as the peak picker is reasonably sophisticated), but
+                        // does significantly damage its ability to work with quieter
+                        // music, so I'm removing it and counting the result always.
+                        // Same goes for the spectral difference measure above.
+
+                        *historyOld = *history;
+                        *history = *theta;
+                        dev
+                    })
+                    .sum(),
+                Type::ComplexSD => self
+                    .thetaAngle
+                    .iter()
+                    .zip(self.magnitude.iter().zip(self.magHistory.iter_mut()))
+                    .zip(
+                        self.phaseHistory
+                            .iter_mut()
+                            .zip(self.phaseHistoryOld.iter_mut()),
+                    )
+                    .map(
+                        |((theta, (mag, magHistory)), (phaseHistory, phaseHistoryOld))| {
+                            let dev = super::math::princarg(
+                                theta - 2.0 * *phaseHistory + *phaseHistoryOld,
+                            );
+                            let meas = *magHistory - (*mag * (Complex64::i() * dev).exp());
+                            let val = meas.norm();
+
+                            *phaseHistoryOld = *phaseHistory;
+                            *phaseHistory = *theta;
+                            *magHistory = *mag;
+
+                            val
+                        },
+                    )
+                    .sum(),
+                Type::Broadband => self
+                    .magnitude
+                    .iter()
+                    .zip(self.magHistory.iter_mut())
+                    .map(|(mag, magHistory)| {
+                        let sqrMag = mag.powi(2);
+                        let val = if *magHistory > 0.0
+                            && (10.0 * (sqrMag / *magHistory).log10() > self.dbRise)
+                        {
+                            1.0
+                        } else {
+                            0.0
+                        };
+
+                        *magHistory = sqrMag;
+
+                        val
+                    })
+                    .sum(),
             }
         }
     }
