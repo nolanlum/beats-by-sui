@@ -28,6 +28,10 @@ mod math {
             .zip(smoothed.iter())
             .for_each(|(d, s)| *d = (*d - s).max(0.0));
     }
+
+    pub fn max(data: &[f64]) -> (usize, f64) {
+        data.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(i, x)| (i, *x)).expect("data was empty?")
+    }
 }
 
 /// A tempo tracker that will operate on beat detection function data calculated from
@@ -99,12 +103,12 @@ impl TempoTrackV2 {
     /// Note, if inputtempo = 120 and constraintempo = false, then functionality is
     /// as it was before
     pub fn calculate_beat_period(
+        &self,
         df: &[f64],
         beat_period: &mut [f64],
-        tempi: &mut [f64],
         input_tempo: f64,
         constrain_tempo: bool,
-    ) {
+    ) -> Vec<f64> {
         // to follow matlab.. split into 512 sample frames with a 128 hop size
         // calculate the acf,
         // then the rcf.. and then stick the rcfs as columns of a matrix
@@ -166,7 +170,7 @@ impl TempoTrackV2 {
         }
 
         // now call viterbi decoding function
-        viterbi_decode(rcfmat, wv, beat_period, tempi);
+        self.viterbi_decode(&rcfmat, &wv, beat_period)
     }
 
     fn get_rcf(df_frame: &[f64], wv: &[f64]) -> Vec<f64> {
@@ -218,6 +222,94 @@ impl TempoTrackV2 {
 
         return rcf;
     }
+
+    #[allow(non_snake_case)]
+    fn viterbi_decode(&self, rcfmat: &[Vec<f64>], wv: &[f64], beat_period: &mut [f64]) -> Vec<f64> {
+        // following Kevin Murphy's Viterbi decoding to get best path of
+        // beat periods through rfcmat
+        let wv_len = wv.len();
+
+        // make transition matrix
+        let mut tmat = vec![vec![0.0; wv_len]; wv_len];
+
+        // variance of Gaussians in transition matrix
+        // formed of Gaussians on diagonal - implies slow tempo change
+        let sigma = 8f64;
+        // don't want really short beat periods, or really long ones
+        (20..wv_len-20).for_each(|i| {
+            (20..wv_len-20).for_each(|j| {
+                let mu = i as f64;
+                tmat[i][j] = (-((j as f64 -mu).powi(2)) / (2.0 * sigma.powi(2))).exp();
+            })
+        });
+
+        // parameters for Viterbi decoding... this part is taken from
+        // Murphy's matlab
+        let mut delta = vec![vec![0.0; rcfmat[0].len()]; rcfmat.len()];
+        let mut psi = vec![vec![0; rcfmat[0].len()]; rcfmat.len()];
+
+        let T = delta.len();
+
+        if T < 2 { return vec![0.0;0]; }; // can't do anything at all meaningful
+
+        let Q = delta[0].len();
+
+        // initialize first column of delta
+        (0..Q).for_each(|j| {
+            delta[0][j] = wv[j] * rcfmat[0][j];
+            psi[0][j] = 0;
+        });
+
+        let deltasum = delta[0].iter().sum::<f64>();
+        delta[0].iter_mut().for_each(|i| *i /= deltasum + EPS);
+
+        (1..T).for_each(|t| {
+            let mut tmp_vec = vec![0.0; Q];
+            (0..Q).for_each(|j| {
+                tmp_vec.iter_mut().enumerate().for_each(|(i, tv)| *tv = delta[t-1][i] * tmat[j][i]);
+                let (max_idx, max_val) = math::max(&tmp_vec);
+                delta[t][j] = max_val;
+                psi[t][j] = max_idx;
+                delta[t][j] *= rcfmat[t][j];
+            });
+
+            // normalise current delta column
+            let deltasum = delta[t].iter().sum::<f64>();
+            delta[t].iter_mut().for_each(|i| *i /= deltasum + EPS);
+        });
+
+        let mut bestpath = vec![0; T];
+        let tmp_vec = delta[T-1].clone();
+
+        // find starting point - best beat period for "last" frame
+        bestpath[T-1] = math::max(&tmp_vec).0;
+
+        // backtrace through index of maximum values in psi
+        (0..T-1).rev().for_each(|t| {
+            bestpath[t] = psi[t+1][bestpath[t+1]];
+        });
+
+        let mut lastind = 0;
+        (0..T).for_each(|i| {
+            let step = 128;
+            (0..step).for_each(|j| {
+                lastind = i * step + j;
+                beat_period[lastind] = bestpath[i] as f64;
+            });
+            println!("bestpath[{}] = {} (used for beat_periods {} to {})",
+        i, bestpath[i], i*step, i*step+step-1);
+        });
+
+        // fill in the last values...
+        (lastind..beat_period.len()).for_each(|i| {
+            beat_period[i] = beat_period[lastind];
+        });
+
+        beat_period.iter().map(|period| {
+            60.0 * self.rate / self.increment as f64 / period
+        }).collect()
+    }
+
 }
 
 #[cfg(test)]
