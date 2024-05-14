@@ -1,0 +1,14 @@
+[package]
+name = "beats-by-sui"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+apodize = "1.0.0"
+approx = "0.5.1"
+rustfft = { version = "6.2.0", features = ["wasm_simd"] }
+wasm-bindgen = "0.2.92"
+wee_alloc = "0.4.5"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
