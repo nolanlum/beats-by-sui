@@ -38,7 +38,7 @@ impl BpmDetector {
     // also matching the preferred window/step sizes from BeatTrack VAMP.
     const STEP_SECS: f64 = 0.01161;
     // results in 43 Hz @ 44.1 kHz / 47 Hz @ 48 kHz / 47 Hz @ 96 kHz
-    const MAX_BIN_SIZE_HZ: u32 = 10;
+    const MAX_BIN_SIZE_HZ: u32 = 50;
 
     pub fn new(sample_rate: u32) -> Self {
         let step_size_frames = (sample_rate as f64 * Self::STEP_SECS).floor() as usize;
