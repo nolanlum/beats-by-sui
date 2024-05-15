@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 apodize = "1.0.0"
 approx = "0.5.1"
+byteorder = "1.5.0"
+ringbuf = "0.4.0"
 rustfft = { version = "6.2.0", features = ["wasm_simd"] }
 symphonia = { version = "0.5.4", features = ["all"] }
 wasm-bindgen = "0.2.92"

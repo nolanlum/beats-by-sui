@@ -9,7 +9,7 @@ const EPS: f64 = 8e-7;
 
 mod math {
     pub fn adaptive_threshold(data: &mut [f64]) {
-        if data.len() == 0 {
+        if data.is_empty() {
             return;
         }
 
@@ -18,7 +18,7 @@ mod math {
 
         let smoothed: Vec<f64> = (0..data.len())
             .map(|i| {
-                let first = 0.max(i - pre);
+                let first = i.saturating_sub(pre);
                 let last = (data.len() - 1).min(i + post);
                 data[first..last].iter().sum::<f64>() / (last - first) as f64
             })
@@ -30,7 +30,11 @@ mod math {
     }
 
     pub fn max(data: &[f64]) -> (usize, f64) {
-        data.iter().enumerate().max_by(|(_, a), (_, b)| a.total_cmp(b)).map(|(i, x)| (i, *x)).expect("data was empty?")
+        data.iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(i, x)| (i, *x))
+            .expect("data was empty?")
     }
 }
 
@@ -40,7 +44,7 @@ mod math {
 /// Currently the sample rate and increment are used only for the conversion from
 /// beat frame location to bpm in the tempo array.
 pub struct TempoTrackV2 {
-    rate: f64,
+    rate: u32,
     increment: usize,
 }
 
@@ -49,53 +53,12 @@ pub struct TempoTrackV2 {
 /// 44100, but surely the fixed window sizes and comb filtering will
 /// make it prefer double or half time when run at e.g. 96000?
 impl TempoTrackV2 {
-    fn filter_df(df: &mut [f64]) {
-        let mut lp_df = vec![0.0; df.len()];
-
-        // equivalent in matlab to [b,a] = butter(2,0.4);
-        //
-        // [b,a] = butter(n,Wn) returns the transfer function coefficients
-        // of an nth-order lowpass digital Butterworth filter with
-        // normalized cutoff frequency Wn.
-        let a = (1.0, -0.3695, 0.1958);
-        let b = (0.2066, 0.4131, 0.2066);
-
-        // forwards filtering
-        {
-            let mut inp = (0.0, 0.0);
-            let mut out = (0.0, 0.0);
-
-            df.iter().zip(lp_df.iter_mut()).for_each(|(df_i, lp_df_i)| {
-                *lp_df_i = b.0 * df_i + b.1 * inp.0 + b.2 * inp.1 - a.1 * out.0 - a.2 * out.1;
-                inp = (*df_i, inp.0);
-                out = (*lp_df_i, out.0);
-            });
-        }
-
-        // copy forwards filtering...
-        // but, time-reversed, ready for backwards filtering
-        let backwards_df = lp_df.clone().into_iter().rev();
-
-        // backwards filtering on time-reversed df
-        {
-            let mut inp = (0.0, 0.0);
-            let mut out = (0.0, 0.0);
-
-            backwards_df
-                .zip(lp_df.iter_mut())
-                .for_each(|(df_i, lp_df_i)| {
-                    *lp_df_i = b.0 * df_i + b.1 * inp.0 + b.2 * inp.1 - a.1 * out.0 - a.2 * out.1;
-                    inp = (df_i, inp.0);
-                    out = (*lp_df_i, out.0);
-                });
-        }
-
-        // write the re-reversed (i.e. forward) version back to df
-        df.iter_mut()
-            .zip(lp_df.iter())
-            .for_each(|(df_i, lp_df_i)| *df_i = *lp_df_i);
+    pub fn new(rate: u32, increment: usize) -> Self {
+        TempoTrackV2 { rate, increment }
     }
 
+    /// Returned beat periods are given in df increment units; inputtempo and tempi in bpm
+    ///
     /// MEPD 28/11/12
     /// This function now allows for a user to specify an inputtempo (in BPM)
     /// and a flag "constraintempo" which replaces the general rayleigh weighting for periodicities
@@ -105,7 +68,7 @@ impl TempoTrackV2 {
     pub fn calculate_beat_period(
         &self,
         df: &[f64],
-        beat_period: &mut [f64],
+        beat_period: &mut [usize],
         input_tempo: f64,
         constrain_tempo: bool,
     ) -> Vec<f64> {
@@ -122,7 +85,7 @@ impl TempoTrackV2 {
         // accordingly.
         // note: 60*44100/512 is a magic number
         // this might (will?) break if a user specifies a different frame rate for the onset detection function
-        let rayparam = (60 * 44100 / 512) as f64 / input_tempo;
+        let rayparam = (60.0 * 48000.0 / 512.0) / input_tempo;
 
         // check whether or not to use rayleigh weighting (if constraintempo is false)
         // or use gaussian weighting it (constraintempo is true)
@@ -161,7 +124,7 @@ impl TempoTrackV2 {
             let df_frame = &df[i..i + winlen];
 
             // get rcf vector for current frame
-            let rcf = Self::get_rcf(df_frame, &wv);
+            let rcf = self.get_rcf(df_frame, &wv);
 
             // add a new colume to rcfmat
             rcfmat.push(rcf);
@@ -173,7 +136,7 @@ impl TempoTrackV2 {
         self.viterbi_decode(&rcfmat, &wv, beat_period)
     }
 
-    fn get_rcf(df_frame: &[f64], wv: &[f64]) -> Vec<f64> {
+    fn get_rcf(&self, df_frame: &[f64], wv: &[f64]) -> Vec<f64> {
         // calculate autocorrelation function
         // then rcf
         // just hard code for now... don't really need separate functions to do this
@@ -195,7 +158,7 @@ impl TempoTrackV2 {
 
         // now apply comb filtering
         let mut rcf = vec![0.0; rcf_len];
-        let numelem: usize = 4;
+        let numelem: i32 = 4;
 
         // max beat period
         (2..rcf_len).for_each(|i| {
@@ -204,7 +167,8 @@ impl TempoTrackV2 {
                 // general state using normalisation of comb elements
                 (1 - a..=a - 1).for_each(|b| {
                     // calculate value for comb filter row
-                    rcf[i - 1] += (acf[(a * i + b) - 1] * wv[i - 1]) / (2.0 * a as f64 - 1.0);
+                    rcf[i - 1] += (acf[((a * i as i32 + b) - 1) as usize] * wv[i - 1])
+                        / (2.0 * a as f64 - 1.0);
                 })
             })
         });
@@ -219,12 +183,16 @@ impl TempoTrackV2 {
             rcfsum += *x;
         }
         rcf.iter_mut().for_each(|x| *x /= rcfsum + EPS);
-
-        return rcf;
+        rcf
     }
 
     #[allow(non_snake_case)]
-    fn viterbi_decode(&self, rcfmat: &[Vec<f64>], wv: &[f64], beat_period: &mut [f64]) -> Vec<f64> {
+    fn viterbi_decode(
+        &self,
+        rcfmat: &[Vec<f64>],
+        wv: &[f64],
+        beat_period: &mut [usize],
+    ) -> Vec<f64> {
         // following Kevin Murphy's Viterbi decoding to get best path of
         // beat periods through rfcmat
         let wv_len = wv.len();
@@ -236,10 +204,10 @@ impl TempoTrackV2 {
         // formed of Gaussians on diagonal - implies slow tempo change
         let sigma = 8f64;
         // don't want really short beat periods, or really long ones
-        (20..wv_len-20).for_each(|i| {
-            (20..wv_len-20).for_each(|j| {
+        (20..wv_len - 20).for_each(|i| {
+            (20..wv_len - 20).for_each(|j| {
                 let mu = i as f64;
-                tmat[i][j] = (-((j as f64 -mu).powi(2)) / (2.0 * sigma.powi(2))).exp();
+                tmat[i][j] = (-((j as f64 - mu).powi(2)) / (2.0 * sigma.powi(2))).exp();
             })
         });
 
@@ -250,7 +218,9 @@ impl TempoTrackV2 {
 
         let T = delta.len();
 
-        if T < 2 { return vec![0.0;0]; }; // can't do anything at all meaningful
+        if T < 2 {
+            return vec![0.0; 0];
+        }; // can't do anything at all meaningful
 
         let Q = delta[0].len();
 
@@ -266,7 +236,10 @@ impl TempoTrackV2 {
         (1..T).for_each(|t| {
             let mut tmp_vec = vec![0.0; Q];
             (0..Q).for_each(|j| {
-                tmp_vec.iter_mut().enumerate().for_each(|(i, tv)| *tv = delta[t-1][i] * tmat[j][i]);
+                tmp_vec
+                    .iter_mut()
+                    .enumerate()
+                    .for_each(|(i, tv)| *tv = delta[t - 1][i] * tmat[j][i]);
                 let (max_idx, max_val) = math::max(&tmp_vec);
                 delta[t][j] = max_val;
                 psi[t][j] = max_idx;
@@ -279,14 +252,14 @@ impl TempoTrackV2 {
         });
 
         let mut bestpath = vec![0; T];
-        let tmp_vec = delta[T-1].clone();
+        let tmp_vec = &delta[T - 1];
 
         // find starting point - best beat period for "last" frame
-        bestpath[T-1] = math::max(&tmp_vec).0;
+        bestpath[T - 1] = math::max(tmp_vec).0;
 
         // backtrace through index of maximum values in psi
-        (0..T-1).rev().for_each(|t| {
-            bestpath[t] = psi[t+1][bestpath[t+1]];
+        (0..T - 1).rev().for_each(|t| {
+            bestpath[t] = psi[t + 1][bestpath[t + 1]];
         });
 
         let mut lastind = 0;
@@ -294,10 +267,15 @@ impl TempoTrackV2 {
             let step = 128;
             (0..step).for_each(|j| {
                 lastind = i * step + j;
-                beat_period[lastind] = bestpath[i] as f64;
+                beat_period[lastind] = bestpath[i];
             });
-            println!("bestpath[{}] = {} (used for beat_periods {} to {})",
-        i, bestpath[i], i*step, i*step+step-1);
+            // println!(
+            //     "bestpath[{}] = {} (used for beat_periods {} to {})",
+            //     i,
+            //     bestpath[i],
+            //     i * step,
+            //     i * step + step - 1
+            // );
         });
 
         // fill in the last values...
@@ -305,25 +283,86 @@ impl TempoTrackV2 {
             beat_period[i] = beat_period[lastind];
         });
 
-        beat_period.iter().map(|period| {
-            60.0 * self.rate / self.increment as f64 / period
-        }).collect()
+        beat_period
+            .iter()
+            .map(|period| 60.0 * self.rate as f64 / self.increment as f64 / *period as f64)
+            .collect()
     }
 
-}
+    pub fn calculate_beats(
+        &self,
+        df: &[f64],
+        beat_period: &[usize],
+        alpha: f64,
+        tightness: f64,
+    ) -> Vec<usize> {
+        if df.is_empty() || beat_period.is_empty() {
+            return Vec::new();
+        }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+        let df_len = df.len();
+        let mut cumscore = vec![0.0; df_len]; // store cumulative score
+        let mut backlink = vec![0; df_len]; // backlink (stores best beat locations at each time instant)
+        let localscore = df; // localscore, for now this is the same as the detection function
 
-    #[test]
-    fn filter_df_simple() {
-        let mut df = vec![1.0; 8];
-        TempoTrackV2::filter_df(&mut df);
-        assert_ulps_eq!(
-            df.as_slice(),
-            [0.2064, 0.6942, 1.0379, 1.0734, 1.0417, 1.0451, 0.9791, 0.7028].as_slice(),
-            epsilon = 1e-4
-        );
+        //double tightness = 4.;
+        //double alpha = 0.9;
+
+        // main loop
+        (0..df_len).for_each(|i| {
+            let prange_min = -2 * beat_period[i] as i32;
+            let prange_max = (-0.5 * beat_period[i] as f64).round() as i32;
+
+            // transition range
+            let txwt_len = (prange_max - prange_min + 1) as usize;
+            let mut txwt = vec![0.0; txwt_len];
+            let mut scorecands = vec![0.0; txwt_len];
+
+            (0..txwt_len).for_each(|j| {
+                let mu = beat_period[i] as f64;
+                txwt[j] = f64::exp(
+                    -0.5 * f64::powi(
+                        tightness * f64::ln((f64::round(2.0 * mu) - j as f64) / mu),
+                        2,
+                    ),
+                );
+
+                // IF IN THE ALLOWED RANGE, THEN LOOK AT CUMSCORE[I+PRANGE_MIN+J
+                // ELSE LEAVE AT DEFAULT VALUE FROM INITIALISATION:  D_VEC_T SCORECANDS (TXWT.SIZE());
+                let cscore_ind = i as i32 + prange_min + j as i32;
+                if cscore_ind >= 0 {
+                    scorecands[j] = txwt[j] * cumscore[cscore_ind as usize];
+                }
+            });
+
+            // find max value and index of maximum value
+            let (xx, vv) = math::max(&scorecands);
+            cumscore[i] = alpha * vv + (1. - alpha) * localscore[i];
+            backlink[i] = (i as i32 + prange_min + xx as i32) as usize;
+        });
+
+        // STARTING POINT, I.E. LAST BEAT.. PICK A STRONG POINT IN cumscore VECTOR
+        let tmp_vec = cumscore[(df_len - beat_period[beat_period.len() - 1])..df_len].to_vec();
+        let (max_idx, _) = math::max(&tmp_vec);
+        let startpoint = max_idx + df_len - beat_period[beat_period.len() - 1];
+
+        // can happen if no results obtained earlier (e.g. input too short)
+        let startpoint = startpoint.min(backlink.len() - 1);
+
+        // USE BACKLINK TO GET EACH NEW BEAT (TOWARDS THE BEGINNING OF THE FILE)
+        //  BACKTRACKING FROM THE END TO THE BEGINNING.. MAKING SURE NOT TO GO BEFORE SAMPLE 0
+        let mut ibeats = Vec::new();
+        ibeats.push(startpoint);
+        while backlink[ibeats[ibeats.len() - 1]] > 0 {
+            let b = ibeats[ibeats.len() - 1];
+            if backlink[b] == b {
+                break;
+            } // shouldn't happen... haha
+            ibeats.push(backlink[b]);
+        }
+
+        // REVERSE SEQUENCE OF IBEATS AND STORE AS BEATS
+        ibeats.reverse();
+        ibeats
     }
 }

@@ -9,8 +9,7 @@ WASM-compatible library for bpm detection, for some reason written in Rust.
 ## How to Use
 
 theoretically, insert the wasm, then call a function.
-32-bit floating point only.
-probably only supports 48kHz.
+the only supported sample format is 32-bit floating point.
 
 ## How to Build
 

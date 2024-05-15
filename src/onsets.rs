@@ -142,8 +142,6 @@ pub mod DetectionFunction {
         dfType: Type,
 
         dataLength: usize,
-        halfLength: usize,
-        stepSize: usize,
         dbRise: f64,
         whiten: bool,
         whitenRelaxCoeff: f64,
@@ -180,8 +178,6 @@ pub mod DetectionFunction {
             DetectionFunction {
                 dfType: df_type,
                 dataLength: frame_length,
-                halfLength,
-                stepSize: step_size,
                 dbRise: db_rise,
 
                 whiten: adaptive_whitening,
@@ -227,12 +223,21 @@ pub mod DetectionFunction {
             )
         }
 
-        pub fn process_time_domain(&mut self, samples: &[f64]) -> f64 {
-            assert!(samples.len() >= self.dataLength);
+        pub fn process_time_domain<'a>(
+            &mut self,
+            samples: impl IntoIterator<Item = &'a f64>,
+            sample_count: usize,
+        ) -> f64 {
+            assert!(sample_count >= self.dataLength);
 
             self.windowed
                 .iter_mut()
-                .zip(samples.iter().zip(self.window.iter()).map(|(x, y)| x * y))
+                .zip(
+                    samples
+                        .into_iter()
+                        .zip(self.window.iter())
+                        .map(|(x, y)| x * y),
+                )
                 .for_each(|(win, sample)| *win = sample);
 
             self.phaseVoc.process_time_domain(

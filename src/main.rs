@@ -1,6 +1,12 @@
+extern crate byteorder;
 extern crate symphonia;
 
-use beats_by_sui::onsets::DetectionFunction;
+use std::{
+    io::{self, Write},
+    time::Instant,
+};
+
+use beats_by_sui::BpmDetector;
 use symphonia::core::{
     audio::SampleBuffer,
     codecs::{self, DecoderOptions},
@@ -15,6 +21,8 @@ fn main() {
     // Get the first command line argument.
     let args: Vec<String> = std::env::args().collect();
     let path = args.get(1).expect("file path not provided");
+
+    let start = Instant::now();
 
     // Open the media source.
     let src = std::fs::File::open(path).expect("failed to open media");
@@ -52,9 +60,15 @@ fn main() {
     // Store the track identifier, it will be used to filter packets.
     let track_id = track.id;
 
-    // Create an array to hold all the decoded and summed samples.
-    let mut samples = Vec::<f32>::new();
+    // Do the thing.
+    let total_frame_count = track.codec_params.n_frames.unwrap();
+    let mut processed_frame_count = 0u64;
+    let mut last_update = Instant::now();
     let mut sample_buf = None;
+    let mut bpm_machine = BpmDetector::new(track.codec_params.sample_rate.unwrap());
+
+    print!("Processed 0/{} frames", total_frame_count);
+    let _ = io::stdout().flush();
 
     // The decode loop.
     loop {
@@ -102,13 +116,25 @@ fn main() {
 
                 // Copy the decoded audio buffer into the sample buffer in an interleaved format.
                 if let Some(buf) = &mut sample_buf {
-                    // Sum all channels into one mono channel.
+                    processed_frame_count += decoded.frames() as u64;
+
+                    if (Instant::now() - last_update).as_millis() > 500 {
+                        print!(
+                            "\rProcessed {}/{} frames",
+                            processed_frame_count, total_frame_count
+                        );
+                        let _ = io::stdout().flush();
+                        last_update = Instant::now();
+                    }
+
+                    // Sum all channels into one mono channel and pass to processor.
                     let channel_count = decoded.spec().channels.count();
                     buf.copy_interleaved_ref(decoded);
-                    samples.extend(
-                        buf.samples()
+                    bpm_machine.process_samples(
+                        &buf.samples()
                             .chunks_exact(channel_count)
-                            .map(|x| (x.iter().sum::<f32>() / x.len() as f32)),
+                            .map(|x| (x.iter().sum::<f32>() / x.len() as f32))
+                            .collect::<Vec<f32>>(),
                     );
                 }
             }
@@ -127,5 +153,10 @@ fn main() {
         }
     }
 
-    println!("Decoded {} samples!", samples.len());
+    println!();
+    println!("Detected tempo: {:.2} bpm", bpm_machine.finalize().bpm);
+    println!(
+        "Finished in {} seconds!",
+        (Instant::now() - start).as_secs_f64(),
+    );
 }
