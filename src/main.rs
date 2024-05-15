@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use beats_by_sui::BpmDetector;
+use beats_by_sui::CoarseBeatDetector;
 use symphonia::core::{
     audio::SampleBuffer,
     codecs::{self, DecoderOptions},
@@ -67,7 +67,7 @@ fn main() {
     let mut processed_frame_count = 0u64;
     let mut last_update = Instant::now();
     let mut sample_buf = None;
-    let mut bpm_machine = BpmDetector::new(sample_rate);
+    let mut bpm_machine = CoarseBeatDetector::new(sample_rate);
 
     print!("Processed 0/{} frames", total_frame_count);
     let _ = io::stdout().flush();
@@ -161,7 +161,13 @@ fn main() {
     println!();
     println!("Detected tempo: {:.2} bpm", bpm.round());
     println!(
+        "Processed {} frames ({:.2} seconds)",
+        bpm_machine.processed_frames(),
+        bpm_machine.processed_frames_duration().as_secs_f64()
+    );
+    println!(
         "Finished in {} seconds!",
         (Instant::now() - start).as_secs_f64(),
     );
+    println!("{:?}", beats);
 }
