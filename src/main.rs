@@ -62,10 +62,12 @@ fn main() {
 
     // Do the thing.
     let total_frame_count = track.codec_params.n_frames.unwrap();
+    let sample_rate = track.codec_params.sample_rate.unwrap();
+    let track_duration_minutes = total_frame_count as f64 / sample_rate as f64 / 60.0;
     let mut processed_frame_count = 0u64;
     let mut last_update = Instant::now();
     let mut sample_buf = None;
-    let mut bpm_machine = BpmDetector::new(track.codec_params.sample_rate.unwrap());
+    let mut bpm_machine = BpmDetector::new(sample_rate);
 
     print!("Processed 0/{} frames", total_frame_count);
     let _ = io::stdout().flush();
@@ -153,8 +155,11 @@ fn main() {
         }
     }
 
+    let beats = bpm_machine.finalize();
+    let bpm = beats.len() as f64 / track_duration_minutes;
+
     println!();
-    println!("Detected tempo: {:.2} bpm", bpm_machine.finalize().bpm);
+    println!("Detected tempo: {:.2} bpm", bpm.round());
     println!(
         "Finished in {} seconds!",
         (Instant::now() - start).as_secs_f64(),

@@ -6,14 +6,11 @@ extern crate rustfft;
 #[macro_use]
 extern crate approx;
 
-pub mod onsets;
-pub mod tempo_track;
+pub mod qm_dsp;
 
-use std::collections::HashMap;
-
-use onsets::DetectionFunction::DetectionFunction;
+use qm_dsp::DetectionFunction::DetectionFunction;
+use qm_dsp::TempoTrackV2;
 use ringbuf::{storage::Heap, traits::*, LocalRb};
-use tempo_track::TempoTrackV2;
 use wasm_bindgen::prelude::wasm_bindgen;
 
 #[wasm_bindgen]
@@ -101,7 +98,7 @@ impl BpmDetector {
         }
     }
 
-    pub fn finalize(&mut self) -> BpmInfo {
+    pub fn finalize(&mut self) -> Vec<usize> {
         // Process the last remaining samples by appending silence.
         let frames_to_fill_window = self.window_buf.vacant_len();
         if frames_to_fill_window < self.step_size_frames {
@@ -131,55 +128,7 @@ impl BpmDetector {
 
         let tt = TempoTrackV2::new(self.sample_rate, self.step_size_frames);
         tt.calculate_beat_period(df, &mut beat_period, 120.0, false);
-
-        let mut period_counts = HashMap::new();
-        let likely_period = beat_period
-            .iter()
-            .copied()
-            .max_by_key(|&n| {
-                let count = period_counts.entry(n).or_insert(0);
-                *count += 1;
-                *count
-            })
-            .unwrap();
-        let bpm =
-            60.0 * self.sample_rate as f64 / self.step_size_frames as f64 / likely_period as f64;
-
-        // Take the mode of the tempi of the beat periods of the entire track
-        // and call it a day.
-        // let mut tempo_counts = HashMap::new();
-        // let tempo = tempi
-        //     .iter()
-        //     .copied()
-        //     .max_by_key(|&n| {
-        //         let count = tempo_counts
-        //             .entry((n * 10000.0).floor() as u64)
-        //             .or_insert(0);
-        //         *count += 1;
-        //         *count
-        //     })
-        //     .unwrap();
-        //
-        // println!(
-        //     "Detected tempo: {:.2} ({:.2}~{:.2}) bpm",
-        //     bpm,
-        //     60.0 * self.sample_rate as f64
-        //         / self.step_size_frames as f64
-        //         / (likely_period as f64 + 0.5),
-        //     60.0 * self.sample_rate as f64
-        //         / self.step_size_frames as f64
-        //         / (likely_period as f64 - 0.5),
-        // );
-
-        BpmInfo {
-            bpm,
-            range_lower: 60.0 * self.sample_rate as f64
-                / self.step_size_frames as f64
-                / (likely_period as f64 + 0.5),
-            range_upper: 60.0 * self.sample_rate as f64
-                / self.step_size_frames as f64
-                / (likely_period as f64 - 0.5),
-        }
+        tt.calculate_beats(df, &beat_period, 0.9, 4.0)
     }
 }
 
@@ -187,5 +136,10 @@ impl BpmDetector {
 pub fn detect_bpm(samples: &[f32], sample_rate: u32) -> BpmInfo {
     let mut bpm_machine = BpmDetector::new(sample_rate);
     bpm_machine.process_samples(samples);
-    bpm_machine.finalize()
+    bpm_machine.finalize();
+    BpmInfo {
+        bpm: 0.0,
+        range_lower: 0.0,
+        range_upper: 0.0,
+    }
 }
