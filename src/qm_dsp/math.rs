@@ -44,3 +44,12 @@ pub fn max(data: &[f64]) -> (usize, f64) {
         .map(|(i, x)| (i, *x))
         .expect("data was empty?")
 }
+
+#[derive(Clone, Copy, Debug)]
+pub enum NormalizeType {
+    None,
+    UnitSum,
+    UnitMax,
+}
+
+pub fn normalize(data: &mut [f64], normalize_type: NormalizeType) {}

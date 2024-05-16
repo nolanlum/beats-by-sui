@@ -33,7 +33,7 @@ impl PhaseVocoder {
     pub fn new(frame_size: usize, hop: usize) -> Self {
         let mut planner = FftPlanner::new();
         let fft = planner.plan_fft_forward(frame_size);
-        let fft_scratch = vec![Complex64::new(0.0, 0.0); fft.get_inplace_scratch_len()];
+        let fft_scratch = vec![Complex64::default(); fft.get_inplace_scratch_len()];
 
         let half_size = frame_size / 2 + 1;
 
