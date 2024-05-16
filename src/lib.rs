@@ -15,14 +15,6 @@ use qm_dsp::TempoTrackV2;
 use ringbuf::{storage::Heap, traits::*, LocalRb};
 use wasm_bindgen::prelude::wasm_bindgen;
 
-#[wasm_bindgen]
-pub struct BpmInfo {
-    pub bpm: f64,
-
-    pub range_lower: f64,
-    pub range_upper: f64,
-}
-
 type FramePos = u64;
 
 /// CoarseBeatDetector uses the qm-dsp library to detect the
@@ -562,15 +554,12 @@ impl Beatmania {
 }
 
 #[wasm_bindgen]
-pub fn detect_bpm(samples: &[f32], sample_rate: u32) -> BpmInfo {
+pub fn detect_bpm(samples: &[f32], sample_rate: u32) -> f64 {
     let mut bpm_machine = CoarseBeatDetector::new(sample_rate);
     bpm_machine.process_samples(samples);
-    bpm_machine.finalize();
-    BpmInfo {
-        bpm: 0.0,
-        range_lower: 0.0,
-        range_upper: 0.0,
-    }
+    let beats = bpm_machine.finalize();
+    let iidx = Beatmania::new(sample_rate);
+    iidx.calculate_bpm(&beats)
 }
 
 #[cfg(test)]
