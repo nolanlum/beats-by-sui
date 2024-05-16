@@ -653,7 +653,7 @@ impl TempoTrackV2 {
         // accordingly.
         // note: 60*44100/512 is a magic number
         // this might (will?) break if a user specifies a different frame rate for the onset detection function
-        let rayparam = (60.0 * 48000.0 / 512.0) / input_tempo;
+        let rayparam = (60.0 * 44100.0 / 512.0) / input_tempo;
 
         // check whether or not to use rayleigh weighting (if constraintempo is false)
         // or use gaussian weighting it (constraintempo is true)
