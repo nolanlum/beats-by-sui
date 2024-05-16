@@ -10,8 +10,8 @@ pub mod qm_dsp;
 
 use std::{fmt::Debug, time::Duration};
 
-use qm_dsp::DetectionFunction::DetectionFunction;
-use qm_dsp::TempoTrackV2;
+use qm_dsp::onsets::DetectionFunction;
+use qm_dsp::tempotracking::TempoTrackV2;
 use ringbuf::{storage::Heap, traits::*, LocalRb};
 use wasm_bindgen::prelude::wasm_bindgen;
 
@@ -26,9 +26,9 @@ type FramePos = u64;
 ///
 /// Expressed in BPM it means we have for instance steps of these
 /// BPM values around 120 BPM:
-/// ```
-/// 117.454 - 120.185 - 123.046 - 126.048
-/// ```
+///
+/// `117.454 - 120.185 - 123.046 - 126.048`
+///
 /// A pure electronic 120.000 BPM track will detect as, many beats at
 /// an interval of 120.185 BPM, and a few 117.454 BPM beats
 /// to adjust the collected offset.
