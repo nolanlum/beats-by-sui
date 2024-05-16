@@ -22,8 +22,6 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let path = args.get(1).expect("file path not provided");
 
-    let start = Instant::now();
-
     // Open the media source.
     let src = std::fs::File::open(path).expect("failed to open media");
 
@@ -159,16 +157,6 @@ fn main() {
     let iidx = Beatmania::new(sample_rate);
     let bpm = iidx.calculate_bpm(&beats);
 
-    println!();
-    println!("Detected tempo: {:.2} bpm", bpm);
-    println!(
-        "Processed {} frames ({:.2} seconds)",
-        bpm_machine.processed_frames(),
-        bpm_machine.processed_frames_duration().as_secs_f64()
-    );
-    println!(
-        "Finished in {} seconds!",
-        (Instant::now() - start).as_secs_f64(),
-    );
+    println!("\rDetected tempo: {:.2} bpm                ", bpm);
     // println!("{:?}", beats);
 }
