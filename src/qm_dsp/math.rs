@@ -52,4 +52,26 @@ pub enum NormalizeType {
     UnitMax,
 }
 
-pub fn normalize(data: &mut [f64], normalize_type: NormalizeType) {}
+pub fn normalize(data: &mut [f64], normalize_type: NormalizeType) {
+    match normalize_type {
+        NormalizeType::None => {}
+
+        NormalizeType::UnitSum => {
+            let sum = data.iter().sum::<f64>();
+            if sum != 0.0 {
+                data.iter_mut().for_each(|x| *x /= sum);
+            }
+        }
+
+        NormalizeType::UnitMax => {
+            let max = data
+                .iter()
+                .map(|x| x.abs())
+                .max_by(|a, b| a.total_cmp(b))
+                .unwrap_or(0.0);
+            if max != 0.0 {
+                data.iter_mut().for_each(|x| *x /= max);
+            }
+        }
+    };
+}

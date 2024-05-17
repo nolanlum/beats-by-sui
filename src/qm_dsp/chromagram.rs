@@ -189,7 +189,7 @@ impl ConstantQ {
     }
 }
 
-struct Chromagram {
+pub struct Chromagram {
     bpo: u32,
     k: u32,
     frame_size: u32,
