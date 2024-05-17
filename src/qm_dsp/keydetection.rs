@@ -72,8 +72,9 @@ impl GetKeyMode {
 
         // Set C3 (= MIDI #48) as our base:
         // This implies that key = 1 => Cmaj, key = 12 => Bmaj, key = 13 => Cmin, etc.
-        let chroma_min = get_frequency_for_pitch(48, 0.0, tuning_frequency);
-        let chroma_max = get_frequency_for_pitch(96, 0.0, tuning_frequency);
+        let cents_offset = -12.0 / BINS_PER_OCTAVE as f64 * 100.0; // 3 bins per note, start with the first
+        let chroma_min = get_frequency_for_pitch(48, cents_offset, tuning_frequency);
+        let chroma_max = get_frequency_for_pitch(96, cents_offset, tuning_frequency);
         let chroma_bpo = BINS_PER_OCTAVE as u32;
         let chroma_cq_thresh = 0.0054;
 
@@ -226,20 +227,19 @@ impl GetKeyMode {
         self.mean_hpcp.iter_mut().for_each(|x| *x -= hpcp);
 
         for k in 0..BINS_PER_OCTAVE {
-            // The Chromagram has the center of C at bin 0, while the major
-            // and minor profiles have the center of C at 1. We want to have
-            // the correlation for C result also at 1.
-            // To achieve this we have to shift two times:
+            // The Chromagram and the major and minor profiles have the
+            // center of C at bin 1. We want to have the correlation for C result
+            // also at 1. To achieve this we have to shift by one:
             self.maj_corr[k] = Self::krum_corr(
                 &self.mean_hpcp,
                 &self.maj_profile_norm,
-                k as i32 - 2,
+                k as i32 - 1,
                 BINS_PER_OCTAVE as i32,
             );
             self.min_corr[k] = Self::krum_corr(
                 &self.mean_hpcp,
                 &self.min_profile_norm,
-                k as i32 - 2,
+                k as i32 - 1,
                 BINS_PER_OCTAVE as i32,
             );
         }
