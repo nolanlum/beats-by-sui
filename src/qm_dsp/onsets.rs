@@ -10,6 +10,7 @@ use rustfft::num_complex::Complex64;
 
 use super::phasevocoder::PhaseVocoder;
 
+#[allow(unused)]
 pub enum Type {
     Hfc,
     SpecDiff,

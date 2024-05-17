@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use beats_by_sui::{Beatmania, CoarseBeatDetector, KeyDetector};
+use beats_by_sui::analyzer::{Beatmania, CoarseBeatDetector, KeyDetector};
 use symphonia::core::{
     audio::SampleBuffer,
     codecs::{self, DecoderOptions},

@@ -45,6 +45,7 @@ pub fn max(data: &[f64]) -> (usize, f64) {
         .expect("data was empty?")
 }
 
+#[allow(unused)]
 #[derive(Clone, Copy, Debug)]
 pub enum NormalizeType {
     None,

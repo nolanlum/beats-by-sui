@@ -64,6 +64,7 @@ impl ConstantQ {
         }
     }
 
+    #[allow(unused)]
     pub fn get_q(&self) -> f64 {
         self.q
     }
@@ -261,6 +262,7 @@ impl Chromagram {
         }
     }
 
+    #[allow(unused)]
     pub fn get_k(&self) -> u32 {
         self.k
     }
@@ -269,6 +271,7 @@ impl Chromagram {
         self.frame_size
     }
 
+    #[allow(unused)]
     pub fn get_hop_size(&self) -> u32 {
         self.hop_size
     }
