@@ -31,7 +31,7 @@ fn get_frequency_for_pitch(midi_pitch: u32, cents_offset: f64, concert_a: f64) -
     concert_a * 2f64.powf((p - 69.0) / 12.0)
 }
 
-struct GetKeyMode {
+pub struct GetKeyMode {
     chroma: Chromagram,
     decimator: Decimator,
     block_size: usize,
@@ -197,7 +197,7 @@ impl GetKeyMode {
     ///
     /// Return a key index in the range 0-24, where 0 indicates no key
     /// detected, 1 is C major, and 13 is C minor.
-    pub fn process(&mut self, pcm_data: &[f64]) -> i32 {
+    pub fn process<'a>(&mut self, pcm_data: impl IntoIterator<Item = &'a f64>) -> i32 {
         self.decimator.process(pcm_data, &mut self.decimated_buffer);
 
         let chroma_ptr = self.chroma.process(&self.decimated_buffer);

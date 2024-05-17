@@ -6,7 +6,7 @@ use std::{
     time::Instant,
 };
 
-use beats_by_sui::{Beatmania, CoarseBeatDetector};
+use beats_by_sui::{Beatmania, CoarseBeatDetector, KeyDetector};
 use symphonia::core::{
     audio::SampleBuffer,
     codecs::{self, DecoderOptions},
@@ -65,6 +65,7 @@ fn main() {
     let mut last_update = Instant::now();
     let mut sample_buf = None;
     let mut bpm_machine = CoarseBeatDetector::new(sample_rate);
+    let mut key_machine = KeyDetector::new(sample_rate);
 
     print!("Processed 0/{} frames", total_frame_count);
     let _ = io::stdout().flush();
@@ -129,12 +130,13 @@ fn main() {
                     // Sum all channels into one mono channel and pass to processor.
                     let channel_count = decoded.spec().channels.count();
                     buf.copy_interleaved_ref(decoded);
-                    bpm_machine.process_samples(
-                        &buf.samples()
-                            .chunks_exact(channel_count)
-                            .map(|x| (x.iter().sum::<f32>() / x.len() as f32))
-                            .collect::<Vec<f32>>(),
-                    );
+                    let mono_samples = buf
+                        .samples()
+                        .chunks_exact(channel_count)
+                        .map(|x| (x.iter().sum::<f32>() / x.len() as f32))
+                        .collect::<Vec<f32>>();
+                    bpm_machine.process_samples(&mono_samples);
+                    key_machine.process_samples(&mono_samples);
                 }
             }
             Err(Error::IoError(_)) => {
@@ -153,10 +155,12 @@ fn main() {
     }
 
     let beats = bpm_machine.finalize();
+    let keys = key_machine.finalize();
 
     let iidx = Beatmania::new(sample_rate);
     let bpm = iidx.calculate_bpm(&beats);
 
     println!("\rDetected tempo: {:.2} bpm                ", bpm);
+    println!("Detected keys: {:?}", keys);
     // println!("{:?}", beats);
 }

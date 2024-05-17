@@ -131,9 +131,11 @@ impl Decimator {
     /// and write inLength / decFactor samples to dst.  Note that src
     /// and dst may be the same or overlap (an intermediate buffer is
     /// used).     
-    pub fn process(&mut self, src: &[f64], dst: &mut [f64]) {
+    pub fn process<'a>(&mut self, src: impl IntoIterator<Item = &'a f64>, dst: &mut [f64]) {
         if self.dec_factor == 1 {
-            dst.copy_from_slice(&src[..self.output_length]);
+            dst.iter_mut()
+                .zip(src.into_iter().take(self.output_length))
+                .for_each(|(dst_i, src_i)| *dst_i = *src_i);
             return;
         }
 
@@ -147,8 +149,8 @@ impl Decimator {
             });
     }
 
-    fn do_anti_alias(&mut self, src: &[f64]) {
-        for (src_i, dst_i) in src.iter().zip(self.dec_buffer.iter_mut()) {
+    fn do_anti_alias<'a>(&mut self, src: impl IntoIterator<Item = &'a f64>) {
+        for (src_i, dst_i) in src.into_iter().zip(self.dec_buffer.iter_mut()) {
             self.input = *src_i;
             self.output = self.input * self.b[0] + self.o[0];
 
