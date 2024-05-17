@@ -1,7 +1,47 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use num_derive::FromPrimitive;
+use num_traits::FromPrimitive;
+use wasm_bindgen::prelude::wasm_bindgen;
+
 use crate::qm_dsp::keydetection;
+
+/// This enum is in chromatic order (not circle of fifths ordering) since
+/// the Chromagram returns key information in chromatic ordering.
+#[wasm_bindgen]
+#[derive(FromPrimitive, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum ChromaticKey {
+    // Major keys
+    CMajor = 1,
+    DFlatMajor = 2,
+    DMajor = 3,
+    EFlatMajor = 4,
+    EMajor = 5,
+    FMajor = 6,
+    GFlatMajor = 7,
+    GMajor = 8,
+    AFlatMajor = 9,
+    AMajor = 10,
+    BFlatMajor = 11,
+    BMajor = 12,
+
+    // Minor keys
+    CMinor = 13,
+    CSharpMinor = 14,
+    DMinor = 15,
+    EFlatMinor = 16,
+    EMinor = 17,
+    FMinor = 18,
+    FSharpMinor = 19,
+    GMinor = 20,
+    GSharpMinor = 21,
+    AMinor = 22,
+    BFlatMinor = 23,
+    BMinor = 24,
+}
+
+impl ChromaticKey {}
 
 pub struct KeyDetector {
     sample_rate: u32,
@@ -64,7 +104,7 @@ impl KeyDetector {
         self.processed_frame_count += samples_read as u64
     }
 
-    pub fn finalize(&mut self) -> Vec<(i32, usize)> {
+    pub fn finalize(&mut self) -> Vec<(ChromaticKey, usize)> {
         // Process the last remaining samples by appending silence.
         let frames_to_fill_window = self.window_size - self.window_buf.len();
         if frames_to_fill_window < self.step_size_frames {
@@ -78,6 +118,7 @@ impl KeyDetector {
             .result_counts_by_key
             .clone()
             .into_iter()
+            .map(|(k, v)| (ChromaticKey::from_i32(k).unwrap(), v))
             .collect::<Vec<_>>();
         results_vec.sort_by_key(|x| x.1);
         results_vec.reverse();
